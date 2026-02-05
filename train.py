@@ -269,19 +269,17 @@ def train():
                                   cache_images=False if opt.prebias else opt.cache_images)
 
     # Dataloader
-    # Optimize num_workers for Kaggle (2 CPUs only!)
-    # Too many workers on limited CPUs causes thrashing
-    nw = min([os.cpu_count(), batch_size]) if os.cpu_count() else 2
-    nw = max(2, min(nw, 4))  # Force 2-4 workers only for Kaggle (not 4-8!)
-    print(f"Using {nw} DataLoader workers on {os.cpu_count()} CPUs")
+    # AGGRESSIVE FIX: Force 2 workers only for Kaggle's limited CPU
+    nw = 2  # FORCE 2 workers only - no more CPU thrashing!
+    print(f"Using {nw} DataLoader workers (forced to 2 for CPU efficiency)")
     dataloader = torch.utils.data.DataLoader(dataset,
                                              batch_size=batch_size,
                                              num_workers=nw,
-                                             shuffle=not opt.rect,  # Shuffle=True unless rectangular training is used
+                                             shuffle=not opt.rect,
                                              pin_memory=True,
                                              collate_fn=dataset.collate_fn,
-                                             prefetch_factor=2,  # Reduced from 4 to 2 for less memory pressure
-                                             persistent_workers=True)  # Keep workers alive between epochs
+                                             prefetch_factor=1,  # Minimal prefetching
+                                             persistent_workers=False)  # Disable to reduce memory overhead
 
     for idx in prune_idx:
         bn_weights = gather_bn_weights(model.module_list, [idx])
@@ -402,8 +400,8 @@ def train():
                 optimizer.step()
                 optimizer.zero_grad()
 
-            # Periodic garbage collection and cache clearing to prevent slowdown over time
-            if ni % 10 == 0:
+            # AGGRESSIVE garbage collection every 5 batches to prevent CPU slowdown
+            if ni % 5 == 0:
                 import gc
                 gc.collect()
                 if torch.cuda.is_available():
@@ -515,7 +513,7 @@ def prebias():
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     parser.add_argument('--epochs', type=int, default=273)  # 500200 batches at bs 16, 117263 images = 273 epochs
-    parser.add_argument('--batch-size', type=int, default=16)  # effective bs = batch_size * accumulate = 16 * 4 = 64
+    parser.add_argument('--batch-size', type=int, default=64)  # INCREASED for better GPU utilization (was 16)
     parser.add_argument('--accumulate', type=int, default=2, help='batches to accumulate before optimizing')
     parser.add_argument('--cfg', type=str, default='cfg/yolov3-spp.cfg', help='cfg file path')
     parser.add_argument('--t_cfg', type=str, default='', help='teacher model cfg file path for knowledge distillation')
