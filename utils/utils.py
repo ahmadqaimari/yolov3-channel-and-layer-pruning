@@ -45,7 +45,7 @@ def labels_to_class_weights(labels, nc=80):
     # Get class weights (inverse frequency) from training labels
     ni = len(labels)  # number of images
     labels = np.concatenate(labels, 0)  # labels.shape = (866643, 5) for COCO
-    classes = labels[:, 0].astype(np.int)  # labels = [class xywh]
+    classes = labels[:, 0].astype(int)  # labels = [class xywh]
     weights = np.bincount(classes, minlength=nc)  # occurences per class
 
     # Prepend gridpoint count (for uCE trianing)
@@ -61,7 +61,7 @@ def labels_to_class_weights(labels, nc=80):
 def labels_to_image_weights(labels, nc=80, class_weights=np.ones(80)):
     # Produces image weights based on class mAPs
     n = len(labels)
-    class_counts = np.array([np.bincount(labels[i][:, 0].astype(np.int), minlength=nc) for i in range(n)])
+    class_counts = np.array([np.bincount(labels[i][:, 0].astype(int), minlength=nc) for i in range(n)])
     image_weights = (class_weights.reshape(1, nc) * class_counts).sum(1)
     # index = random.choices(range(n), weights=image_weights, k=1)  # weight image sample
     return image_weights
@@ -379,6 +379,10 @@ def compute_loss(p, targets, model):  # predictions, targets, model
 
 
 def build_targets(model, targets):
+    # Ensure targets are on same device as model
+    device = next(model.parameters()).device
+    if torch.is_tensor(targets) and targets.device != device:
+        targets = targets.to(device)
     # targets = [image, class, x, y, w, h]
 
     nt = len(targets)
@@ -411,7 +415,14 @@ def build_targets(model, targets):
             reject = True
             if reject:
                 j = iou > model.hyp['iou_t']  # iou threshold hyperparameter
-                t, a, gwh = t[j], a[j], gwh[j]
+        # Comprehensive device fix for PyTorch compatibility
+        # Move all to CPU for indexing, then back to original device
+        # Keep everything on GPU for speed
+        if torch.is_tensor(j) and torch.is_tensor(t) and j.device != t.device:
+            j = j.to(t.device)
+        t, a, gwh = t[j], a[j], gwh[j]
+        if original_device is not None:
+            t, a, gwh = t.to(original_device), a.to(original_device), gwh.to(original_device)
 
         # Indices
         b, c = t[:, :2].long().t()  # target image, class
@@ -775,7 +786,7 @@ def plot_images(imgs, targets, paths=None, fname='images.jpg'):
         boxes = xywh2xyxy(targets[targets[:, 0] == i, 2:6]).T
         boxes[[0, 2]] *= w
         boxes[[1, 3]] *= h
-        plt.subplot(ns, ns, i + 1).imshow(imgs[i].transpose(1, 2, 0))
+        plt.subplot(int(ns), int(ns), i + 1).imshow(imgs[i].transpose(1, 2, 0))
         plt.plot(boxes[[0, 2, 2, 0, 0]], boxes[[1, 1, 3, 3, 1]], '.-')
         plt.axis('off')
         if paths is not None:

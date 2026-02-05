@@ -371,7 +371,7 @@ def load_darknet_weights(self, weights, cutoff=-1):
                     conv_w = torch.from_numpy(weights[ptr:ptr + num_w]).view_as(conv_layer.weight)
                     conv_layer.weight.data.copy_(conv_w)
                     ptr += num_w
-    assert ptr == len(weights)
+    # assert ptr == len(weights)  # Commented out to allow partial loading for transfer learning
     return cutoff
 
 
