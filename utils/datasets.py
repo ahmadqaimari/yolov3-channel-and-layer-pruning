@@ -413,7 +413,11 @@ class LoadImagesAndLabels(Dataset):  # for training/testing
         img_path = self.img_files[index]
         label_path = self.label_files[index]
 
-        mosaic = True and self.augment  # load 4 images at a time into a mosaic (only during training)
+        # MOSAIC AUGMENTATION - Can be disabled for better GPU utilization
+        # Set ENABLE_MOSAIC=1 environment variable to enable, or edit this line
+        # Mosaic loads 4 images per sample which can severely bottleneck GPU on slow storage
+        enable_mosaic = os.environ.get('ENABLE_MOSAIC', '0') == '1'
+        mosaic = self.augment and enable_mosaic and random.random() < 0.5  # 50% when enabled
         if mosaic:
             # Load mosaic
             img, labels = load_mosaic(self, index)
