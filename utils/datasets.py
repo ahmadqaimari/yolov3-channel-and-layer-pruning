@@ -407,89 +407,44 @@ class LoadImagesAndLabels(Dataset):  # for training/testing
     #     return self
 
     def __getitem__(self, index):
-        if self.image_weights:
-            index = self.indices[index]
-
+        # NUCLEAR SIMPLIFICATION - Remove ALL expensive operations
         img_path = self.img_files[index]
         label_path = self.label_files[index]
 
-        # MOSAIC COMPLETELY DISABLED - CPU bottleneck issue
-        # Mosaic loads 4 images per sample = 4x CPU load
-        # Re-enable only after GPU utilization is stable
-        mosaic = False  # Forced disabled
-        if mosaic:
-            # Load mosaic
-            img, labels = load_mosaic(self, index)
-            h, w, _ = img.shape
+        # Load image - simple and fast
+        img = self.imgs[index]
+        if img is None:
+            img = cv2.imread(img_path, cv2.IMREAD_COLOR)
+            assert img is not None, 'Image Not Found ' + img_path
 
-        else:
-            # Load image
-            img = load_image(self, index)
+        h0, w0 = img.shape[:2]  # original hw
 
-            # Letterbox
-            h, w, _ = img.shape
-            if self.rect:
-                img, ratio, padw, padh = letterbox(img, self.batch_shapes[self.batch[index]], mode='rect')
-            else:
-                img, ratio, padw, padh = letterbox(img, self.img_size, mode='square')
+        # Simple resize to target size - NO letterbox padding
+        if h0 != self.img_size or w0 != self.img_size:
+            img = cv2.resize(img, (self.img_size, self.img_size), interpolation=cv2.INTER_LINEAR)
 
-            # Load labels
-            labels = []
-            if os.path.isfile(label_path):
-                x = self.labels[index]
-                if x is None:  # labels not preloaded
-                    with open(label_path, 'r') as f:
-                        x = np.array([x.split() for x in f.read().splitlines()], dtype=np.float32)
+        h, w = self.img_size, self.img_size
 
-                if x.size > 0:
-                    # Normalized xywh to pixel xyxy format
-                    labels = x.copy()
-                    labels[:, 1] = ratio[0] * w * (x[:, 1] - x[:, 3] / 2) + padw
-                    labels[:, 2] = ratio[1] * h * (x[:, 2] - x[:, 4] / 2) + padh
-                    labels[:, 3] = ratio[0] * w * (x[:, 1] + x[:, 3] / 2) + padw
-                    labels[:, 4] = ratio[1] * h * (x[:, 2] + x[:, 4] / 2) + padh
+        # Load labels - simple
+        labels = []
+        if os.path.isfile(label_path):
+            x = self.labels[index]
+            if x is None:
+                with open(label_path, 'r') as f:
+                    x = np.array([x.split() for x in f.read().splitlines()], dtype=np.float32)
+            if x.size > 0:
+                labels = x.copy()  # Already normalized xywh format
 
-        if self.augment:
-            # TEMPORARILY DISABLE ALL AUGMENTATION TO TEST GPU UTILIZATION
-            # Re-enable after confirming GPU works properly
-            pass  # Skip all augmentation for now
-
-            # Apply cutouts
-            # if random.random() < 0.9:
-            #     labels = cutout(img, labels)
-
-        nL = len(labels)  # number of labels
-        if nL:
-            # convert xyxy to xywh
-            labels[:, 1:5] = xyxy2xywh(labels[:, 1:5])
-
-            # Normalize coordinates 0 - 1
-            labels[:, [2, 4]] /= img.shape[0]  # height
-            labels[:, [1, 3]] /= img.shape[1]  # width
-
-        if self.augment:
-            # random left-right flip
-            lr_flip = True
-            if lr_flip and random.random() < 0.5:
-                img = np.fliplr(img)
-                if nL:
-                    labels[:, 1] = 1 - labels[:, 1]
-
-            # random up-down flip
-            ud_flip = False
-            if ud_flip and random.random() < 0.5:
-                img = np.flipud(img)
-                if nL:
-                    labels[:, 2] = 1 - labels[:, 2]
-
+        # Convert to output format
+        nL = len(labels)
         labels_out = torch.zeros((nL, 6))
         if nL:
             labels_out[:, 1:] = torch.from_numpy(labels)
 
-        # Convert BGR to RGB, to 3x416x416 - optimized for speed
-        img = img[:, :, ::-1].transpose(2, 0, 1)  # BGR to RGB, to 3x416x416
-        img = np.ascontiguousarray(img, dtype=np.float32)  # uint8 to float32
-        img /= 255.0  # 0 - 255 to 0.0 - 1.0
+        # Convert BGR to RGB and normalize - minimal operations
+        img = img[:, :, ::-1].transpose(2, 0, 1)  # BGR to RGB, HWC to CHW
+        img = np.ascontiguousarray(img, dtype=np.float32)
+        img /= 255.0
 
         return torch.from_numpy(img), labels_out, img_path, (h, w)
 
