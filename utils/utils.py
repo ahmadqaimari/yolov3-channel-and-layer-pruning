@@ -406,7 +406,7 @@ def build_targets(model, targets):
                 iou, a = iou.max(0)  # best iou and anchor
             else:  # use all anchors
                 na = len(anchor_vec)  # number of anchors
-                a = torch.arange(na).view((-1, 1)).repeat([1, nt]).view(-1)
+                a = torch.arange(na, device=device).view((-1, 1)).repeat([1, nt]).view(-1)
                 t = targets.repeat([na, 1])
                 gwh = gwh.repeat([na, 1])
                 iou = iou.view(-1)  # use all ious
@@ -416,13 +416,10 @@ def build_targets(model, targets):
             if reject:
                 j = iou > model.hyp['iou_t']  # iou threshold hyperparameter
         # Comprehensive device fix for PyTorch compatibility
-        # Move all to CPU for indexing, then back to original device
-        # Keep everything on GPU for speed
-        if torch.is_tensor(j) and torch.is_tensor(t) and j.device != t.device:
-            j = j.to(t.device)
+        # Ensure j is on the same device as tensors being indexed
+        if torch.is_tensor(j) and torch.is_tensor(a) and j.device != a.device:
+            j = j.to(a.device)
         t, a, gwh = t[j], a[j], gwh[j]
-        if original_device is not None:
-            t, a, gwh = t.to(original_device), a.to(original_device), gwh.to(original_device)
 
         # Indices
         b, c = t[:, :2].long().t()  # target image, class
