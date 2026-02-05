@@ -258,28 +258,32 @@ def train():
         model.yolo_layers = model.module.yolo_layers  # move yolo layer indices to top level
 
     # Dataset
+    # DISABLE AUGMENTATION COMPLETELY TO FIX CPU BOTTLENECK
+    # Auto-enable cache_images for large batch sizes to eliminate I/O bottleneck
+    auto_cache = batch_size >= 64 and not opt.prebias
+    if auto_cache:
+        print(f"Auto-enabling cache_images for batch_size={batch_size} to eliminate disk I/O bottleneck")
+
     dataset = LoadImagesAndLabels(train_path,
                                   img_size,
                                   batch_size,
-                                  augment=True,
+                                  augment=False,  # DISABLED - was True
                                   hyp=hyp,  # augmentation hyperparameters
                                   rect=opt.rect,  # rectangular training
                                   image_weights=opt.img_weights,
                                   cache_labels=True if epochs > 10 else False,
-                                  cache_images=False if opt.prebias else opt.cache_images)
+                                  cache_images=auto_cache or opt.cache_images)  # Auto-cache for large batches
 
     # Dataloader
-    # AGGRESSIVE FIX: Force 2 workers only for Kaggle's limited CPU
-    nw = 2  # FORCE 2 workers only - no more CPU thrashing!
-    print(f"Using {nw} DataLoader workers (forced to 2 for CPU efficiency)")
+    # EXTREME FIX: Try num_workers=0 (no multiprocessing) to eliminate CPU overhead
+    nw = 0  # Run in main process only - no worker overhead!
+    print(f"Using {nw} DataLoader workers (main process only - testing CPU fix)")
     dataloader = torch.utils.data.DataLoader(dataset,
                                              batch_size=batch_size,
                                              num_workers=nw,
                                              shuffle=not opt.rect,
                                              pin_memory=True,
-                                             collate_fn=dataset.collate_fn,
-                                             prefetch_factor=1,  # Minimal prefetching
-                                             persistent_workers=False)  # Disable to reduce memory overhead
+                                             collate_fn=dataset.collate_fn)
 
     for idx in prune_idx:
         bn_weights = gather_bn_weights(model.module_list, [idx])

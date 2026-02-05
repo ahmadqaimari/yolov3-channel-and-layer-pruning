@@ -509,15 +509,12 @@ def load_image(self, index):
         img = cv2.imread(img_path, cv2.IMREAD_COLOR)  # BGR - explicitly specify to avoid alpha channel
         assert img is not None, 'Image Not Found ' + img_path
         r = self.img_size / max(img.shape)  # size ratio
-        if self.augment and r < 1:  # if training (NOT testing), downsize to inference shape
+        if r < 1:  # if image too large, downsize to inference shape
             h, w, _ = img.shape
-            # Use INTER_AREA for downscaling (better quality and faster for shrinking)
-            img = cv2.resize(img, (int(w * r), int(h * r)), interpolation=cv2.INTER_AREA)
+            # Use INTER_LINEAR for speed (INTER_AREA is slower)
+            img = cv2.resize(img, (int(w * r), int(h * r)), interpolation=cv2.INTER_LINEAR)
 
     # Augment colorspace - DISABLED FOR TESTING
-    # Re-enable after GPU utilization is confirmed working
-    # if self.augment and random.random() < 0.5:
-    #     augment_hsv(img, hgain=self.hyp['hsv_h'], sgain=self.hyp['hsv_s'], vgain=self.hyp['hsv_v'])
 
     return img
 
