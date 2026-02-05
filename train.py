@@ -1,4 +1,12 @@
 import argparse
+import os
+
+# Optimize CPU threading for better GPU utilization
+# Set before importing numpy/torch to avoid thread contention
+os.environ['OMP_NUM_THREADS'] = '1'
+os.environ['MKL_NUM_THREADS'] = '1'
+os.environ['OPENBLAS_NUM_THREADS'] = '1'
+os.environ['NUMEXPR_NUM_THREADS'] = '1'
 
 import torch.distributed as dist
 import torch.optim as optim
@@ -261,12 +269,18 @@ def train():
                                   cache_images=False if opt.prebias else opt.cache_images)
 
     # Dataloader
+    # Optimize num_workers for Kaggle/Colab (typically 2 CPUs, so use 4-8 workers)
+    # More workers = better GPU utilization
+    nw = min([os.cpu_count(), batch_size]) if os.cpu_count() else 4
+    nw = max(4, min(nw, 8))  # Force at least 4, cap at 8 for Kaggle
     dataloader = torch.utils.data.DataLoader(dataset,
                                              batch_size=batch_size,
-                                             num_workers=min([os.cpu_count(), batch_size, 16]),
+                                             num_workers=nw,
                                              shuffle=not opt.rect,  # Shuffle=True unless rectangular training is used
                                              pin_memory=True,
-                                             collate_fn=dataset.collate_fn)
+                                             collate_fn=dataset.collate_fn,
+                                             prefetch_factor=4,  # Prefetch 4 batches per worker
+                                             persistent_workers=True)  # Keep workers alive between epochs
 
     for idx in prune_idx:
         bn_weights = gather_bn_weights(model.module_list, [idx])

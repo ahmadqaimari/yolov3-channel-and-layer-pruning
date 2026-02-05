@@ -16,6 +16,9 @@ from tqdm import tqdm
 
 from utils.utils import xyxy2xywh, xywh2xyxy
 
+# Optimize OpenCV threading - disable multithreading to avoid contention with DataLoader workers
+cv2.setNumThreads(0)
+
 img_formats = ['.bmp', '.jpg', '.jpeg', '.png', '.tif']
 vid_formats = ['.mov', '.avi', '.mp4']
 
@@ -485,7 +488,7 @@ class LoadImagesAndLabels(Dataset):  # for training/testing
         if nL:
             labels_out[:, 1:] = torch.from_numpy(labels)
 
-        # Normalize
+        # Convert BGR to RGB, to 3x416x416 - optimized for speed
         img = img[:, :, ::-1].transpose(2, 0, 1)  # BGR to RGB, to 3x416x416
         img = np.ascontiguousarray(img, dtype=np.float32)  # uint8 to float32
         img /= 255.0  # 0 - 255 to 0.0 - 1.0
@@ -505,12 +508,13 @@ def load_image(self, index):
     img = self.imgs[index]
     if img is None:
         img_path = self.img_files[index]
-        img = cv2.imread(img_path)  # BGR
+        img = cv2.imread(img_path, cv2.IMREAD_COLOR)  # BGR - explicitly specify to avoid alpha channel
         assert img is not None, 'Image Not Found ' + img_path
         r = self.img_size / max(img.shape)  # size ratio
         if self.augment and r < 1:  # if training (NOT testing), downsize to inference shape
             h, w, _ = img.shape
-            img = cv2.resize(img, (int(w * r), int(h * r)), interpolation=cv2.INTER_LINEAR)  # _LINEAR fastest
+            # Use INTER_AREA for downscaling (better quality and faster for shrinking)
+            img = cv2.resize(img, (int(w * r), int(h * r)), interpolation=cv2.INTER_AREA)
 
     # Augment colorspace
     if self.augment:
