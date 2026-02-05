@@ -269,17 +269,18 @@ def train():
                                   cache_images=False if opt.prebias else opt.cache_images)
 
     # Dataloader
-    # Optimize num_workers for Kaggle/Colab (typically 2 CPUs, so use 4-8 workers)
-    # More workers = better GPU utilization
-    nw = min([os.cpu_count(), batch_size]) if os.cpu_count() else 4
-    nw = max(4, min(nw, 8))  # Force at least 4, cap at 8 for Kaggle
+    # Optimize num_workers for Kaggle (2 CPUs only!)
+    # Too many workers on limited CPUs causes thrashing
+    nw = min([os.cpu_count(), batch_size]) if os.cpu_count() else 2
+    nw = max(2, min(nw, 4))  # Force 2-4 workers only for Kaggle (not 4-8!)
+    print(f"Using {nw} DataLoader workers on {os.cpu_count()} CPUs")
     dataloader = torch.utils.data.DataLoader(dataset,
                                              batch_size=batch_size,
                                              num_workers=nw,
                                              shuffle=not opt.rect,  # Shuffle=True unless rectangular training is used
                                              pin_memory=True,
                                              collate_fn=dataset.collate_fn,
-                                             prefetch_factor=4,  # Prefetch 4 batches per worker
+                                             prefetch_factor=2,  # Reduced from 4 to 2 for less memory pressure
                                              persistent_workers=True)  # Keep workers alive between epochs
 
     for idx in prune_idx:
@@ -400,6 +401,13 @@ def train():
             if ni % accumulate == 0:
                 optimizer.step()
                 optimizer.zero_grad()
+
+            # Periodic garbage collection and cache clearing to prevent slowdown over time
+            if ni % 10 == 0:
+                import gc
+                gc.collect()
+                if torch.cuda.is_available():
+                    torch.cuda.empty_cache()  # Clear unused GPU memory
 
             # Print batch results
             mloss = (mloss * i + loss_items) / (i + 1)  # update mean losses

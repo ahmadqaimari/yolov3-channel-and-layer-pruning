@@ -413,11 +413,10 @@ class LoadImagesAndLabels(Dataset):  # for training/testing
         img_path = self.img_files[index]
         label_path = self.label_files[index]
 
-        # MOSAIC AUGMENTATION - Can be disabled for better GPU utilization
-        # Set ENABLE_MOSAIC=1 environment variable to enable, or edit this line
-        # Mosaic loads 4 images per sample which can severely bottleneck GPU on slow storage
-        enable_mosaic = os.environ.get('ENABLE_MOSAIC', '0') == '1'
-        mosaic = self.augment and enable_mosaic and random.random() < 0.5  # 50% when enabled
+        # MOSAIC COMPLETELY DISABLED - CPU bottleneck issue
+        # Mosaic loads 4 images per sample = 4x CPU load
+        # Re-enable only after GPU utilization is stable
+        mosaic = False  # Forced disabled
         if mosaic:
             # Load mosaic
             img, labels = load_mosaic(self, index)
@@ -451,14 +450,16 @@ class LoadImagesAndLabels(Dataset):  # for training/testing
                     labels[:, 4] = ratio[1] * h * (x[:, 2] + x[:, 4] / 2) + padh
 
         if self.augment:
-            # Augment imagespace
-            g = 0.0 if mosaic else 1.0  # do not augment mosaics
-            hyp = self.hyp
-            img, labels = random_affine(img, labels,
-                                        degrees=hyp['degrees'] * g,
-                                        translate=hyp['translate'] * g,
-                                        scale=hyp['scale'] * g,
-                                        shear=hyp['shear'] * g)
+            # Augment imagespace - REDUCED to 50% probability to lower CPU load
+            # Apply augmentation only 50% of the time to keep GPU fed
+            if random.random() < 0.5:
+                g = 0.0 if mosaic else 1.0  # do not augment mosaics
+                hyp = self.hyp
+                img, labels = random_affine(img, labels,
+                                            degrees=hyp['degrees'] * g,
+                                            translate=hyp['translate'] * g,
+                                            scale=hyp['scale'] * g,
+                                            shear=hyp['shear'] * g)
 
             # Apply cutouts
             # if random.random() < 0.9:
@@ -520,8 +521,8 @@ def load_image(self, index):
             # Use INTER_AREA for downscaling (better quality and faster for shrinking)
             img = cv2.resize(img, (int(w * r), int(h * r)), interpolation=cv2.INTER_AREA)
 
-    # Augment colorspace
-    if self.augment:
+    # Augment colorspace - Apply only 50% of the time to reduce CPU load
+    if self.augment and random.random() < 0.5:
         augment_hsv(img, hgain=self.hyp['hsv_h'], sgain=self.hyp['hsv_s'], vgain=self.hyp['hsv_v'])
 
     return img
